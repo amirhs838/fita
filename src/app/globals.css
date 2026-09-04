@@ -1,0 +1,334 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "IRANSans", "Vazirmatn", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-positive: var(--positive);
+  /* ── Fita brand tokens ── */
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  /* ── Fita energy accent (food/scan signature) ── */
+  --color-energy: var(--energy);
+  --color-energy-strong: var(--energy-strong);
+  --color-energy-soft: var(--energy-soft);
+  --color-surface: var(--card);
+  --color-surface-alt: var(--surface-alt);
+  --color-elevated: var(--elevated);
+  --color-divider: var(--divider);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/*
+ * Fita — "Marine" single palette
+ * ──────────────────────────────
+ * One brand palette, four source colors:
+ *   #F9F9F9 White      → page canvas
+ *   #FFFFFF            → raised surfaces (cards, sheets)
+ *   #092634 Navy Blue  → ink: ALL text (rich deep-navy, never dead black)
+ *                        + DEEP STRUCTURAL SURFACES: bottom tab bar, diary
+ *                        summary hero, weight-journey hero, camera circles
+ *                        on energy. White on navy = 16:1, white/55 ≈ 5.4:1.
+ *   #004E72 Blue       → THE interactive color: CTA, links, rings, water,
+ *                        week strip, chips, charts (white text on it = 9:1)
+ *   #FF6E42 Orange     → "energy" signature — food/calorie identity with a
+ *                        confident but capped presence (~6% of pixels):
+ *                        calorie ring, diary summary progress bar, streak
+ *                        flame/pill, scan FAB + scan hero + camera card,
+ *                        carbs macro bar, active-nav dot. Orange surfaces
+ *                        ALWAYS carry navy ink (5.6:1); orange text on navy
+ *                        is 5.6:1 ✓; orange text/icons on light use
+ *                        --energy-strong (#C74A1C, 4.8:1) — raw #FF6E42
+ *                        is never used as text on light.
+ *
+ * Token contract:
+ *   --background canvas · --card raised surface · --popover top-most ·
+ *   --elevated floating layer · --surface-alt soft tinted section ·
+ *   --primary interactive blue · --brand mid accent · --brand-strong deep ·
+ *   --brand-soft blue tint (tracks/chips/selected-soft) · --energy orange ·
+ *   --energy-strong readable orange · --energy-soft orange tint ·
+ *   --accent shadcn hover tint (NEUTRAL) · --muted quiet fill ·
+ *   --border/--input/--divider navy-alpha hairlines
+ */
+
+:root {
+  color-scheme: light;
+  --radius: 1rem;
+  /* canvas + surfaces */
+  --background: #f9f9f9;
+  --foreground: #092634;
+  --card: #ffffff;
+  --card-foreground: #092634;
+  --popover: #ffffff;
+  --popover-foreground: #092634;
+  --elevated: #fdfdfd;
+  --surface-alt: #eff3f5;
+  /* interactive blue */
+  --primary: #004e72;
+  --primary-foreground: #ffffff;
+  --secondary: #e6edf1;
+  --secondary-foreground: #0b3247;
+  --muted: #edf1f3;
+  --muted-foreground: #556b76;
+  --accent: #eef2f4;
+  --accent-foreground: #092634;
+  /* energy orange (food/scan signature) */
+  --energy: #ff6e42;
+  --energy-strong: #c74a1c;
+  --energy-soft: #fee9e1;
+  /* status */
+  --destructive: #b5483f;
+  --positive: #3e7d5c;
+  /* hairlines — navy alpha so borders share the ink's cast */
+  --border: #09263412;
+  --input: #09263424;
+  --divider: #0926340f;
+  --ring: #004e72;
+  /* brand ramp */
+  --brand: #004e72;
+  --brand-strong: #003952;
+  --brand-soft: #dbe9f0;
+  /* charts — single blue ladder + ink baseline */
+  --chart-1: #003952;
+  --chart-2: #004e72;
+  --chart-3: #004e7294;
+  --chart-4: #004e724d;
+  --chart-5: #092634;
+  /* sidebar (kept for shadcn completeness) */
+  --sidebar: #f9f9f9;
+  --sidebar-foreground: #092634;
+  --sidebar-primary: #004e72;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef2f4;
+  --sidebar-accent-foreground: #092634;
+  --sidebar-border: #09263412;
+  --sidebar-ring: #004e72;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* IRANSans ships up to Bold — never synthesize heavier weights */
+    font-synthesis-weight: none;
+    transition: background-color 240ms ease, color 240ms ease;
+  }
+  ::selection {
+    background: var(--brand-soft);
+    color: var(--foreground);
+  }
+}
+
+/* ── IRANSans (web) ─────────────────────────────────────────── */
+@font-face {
+  font-family: "IRANSans";
+  src: url("/fonts/IRANSans-UltraLight.woff2") format("woff2");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IRANSans";
+  src: url("/fonts/IRANSans-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IRANSans";
+  src: url("/fonts/IRANSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IRANSans";
+  src: url("/fonts/IRANSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IRANSans";
+  src: url("/fonts/IRANSans-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Vazirmatn (fallback) ───────────────────────────────────── */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Fita typography tokens ────────────────────────────────────────────────
+ * Reusable scale — Persian-first. NO letter-spacing on Persian words
+ * (it breaks the joining). Negative tracking only on digits (safe).
+ */
+.t-display {
+  /* dominant metric — the calorie/weight number */
+  font-size: 2.5rem;
+  line-height: 1.1;
+  font-weight: 700;
+}
+.t-title {
+  /* screen title */
+  font-size: 1.5rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+.t-headline {
+  /* section headline */
+  font-size: 1.1875rem;
+  line-height: 1.45;
+  font-weight: 700;
+}
+.t-body {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.t-body-sm {
+  font-size: 0.84375rem;
+  line-height: 1.65;
+}
+.t-caption {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-weight: 500;
+}
+.t-label {
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* Dominant metrics — Persian-friendly tabular numerals */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Editorial section eyebrow */
+.eyebrow {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted-foreground);
+}
+
+/* Hairline divider that respects RTL */
+.hairline {
+  border-color: var(--divider);
+}
+
+/* Slim scrollbars for long lists — theme-aware */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 32%, transparent) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted-foreground) 32%, transparent);
+  border-radius: 9999px;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* iOS bottom safe-area for the tab bar */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.375rem);
+}
+
+/* Scanning line shimmer (food-scan analyzing state) */
+@keyframes fita-scanline {
+  0% { transform: translateY(-110%); }
+  100% { transform: translateY(110%); }
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: 42%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklch, var(--background) 55%, transparent),
+    transparent
+  );
+  animation: fita-scanline 1.6s ease-in-out infinite;
+}
+

@@ -1,0 +1,504 @@
+// Fita — full application schema (Phase 1)
+// SQLite in sandbox; written PostgreSQL-portable:
+//   - no enums (String + documented constant sets, zod-validated at API boundary)
+//   - no primitive lists (JSON serialized into String columns, named *Json)
+//   - dates: DateTime for timestamps, ISO "YYYY-MM-DD" String for day keys
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Auth ───────────────────────────
+
+model OtpCode {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String // sha256(phone:code:JWT_SECRET)
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique // canonical 989XXXXXXXXX
+  name      String?
+  status    String   @default("ACTIVE") // ACTIVE | DELETED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile            UserProfile?
+  goals              Goal[]
+  weights            WeightRecord[]
+  measurements       BodyMeasurement[]
+  allergies          Allergy[]
+  dislikedFoods      DislikedFood[]
+  favoriteFoods      FavoriteFood[]
+  dietPreferences    DietPreference[]
+  foodLogs           FoodLog[]
+  mealPlans          MealPlan[]
+  waterLogs          WaterLog[]
+  conversations      AIConversation[]
+  subscription       Subscription?
+  achievements       UserAchievement[]
+  leaderboardRecords LeaderboardRecord[]
+  stats              UserStats?
+  notificationPrefs  NotificationPreference?
+  progressRecords    ProgressRecord[]
+  analyticsEvents    AnalyticsEvent[]
+  customFoods        Food[]                  @relation("CustomFoods")
+  challengeEntries   ChallengeParticipant[]
+  paymentOrders      PaymentOrder[]
+}
+
+// ─────────────────────── Profile & goals ───────────────────────
+
+model UserProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id])
+  gender          String? // MALE | FEMALE
+  birthYear       Int? // age entered at onboarding → stored as birth year
+  heightCm        Float?
+  currentWeightKg Float? // fast-access mirror of latest WeightRecord
+  activityLevel   String? // SEDENTARY | LIGHT | MODERATE | ACTIVE | VERY_ACTIVE
+  mealsPerDay     Int       @default(3) // 2..6
+  budgetLevel     String? // ECONOMY | MID | FLEXIBLE
+  pregnancy       Boolean   @default(false)
+  breastfeeding   Boolean   @default(false)
+  medications     String?
+  medicalNotes    String?
+  likedFoodsJson  String? // JSON array of free-text liked foods from onboarding (planner input; FavoriteFood rows are foodId-linked)
+  onboardedAt     DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
+model Goal {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  type           String // LOSE_WEIGHT | MAINTAIN | GAIN_WEIGHT | BUILD_MUSCLE | RECOMP | CUSTOM
+  targetWeightKg Float?
+  paceKgPerWeek  Float? // signed; user-suggested pace, clamped by safety rules
+  status         String    @default("ACTIVE") // ACTIVE | ARCHIVED
+  // Snapshot of Nutrition-Engine output for this goal (recomputed server-side)
+  kcalTarget     Int?
+  proteinTargetG Int?
+  carbTargetG    Int?
+  fatTargetG     Int?
+  fiberTargetG   Int?
+  method         String? // formula/version tag, e.g. "mifflin-v1"
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  archivedAt     DateTime?
+
+  @@index([userId, status])
+}
+
+model BodyMeasurement {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  date      String // YYYY-MM-DD
+  waistCm   Float?
+  hipCm     Float?
+  neckCm    Float?
+  armCm     Float?
+  thighCm   Float?
+  wristCm   Float?
+  otherJson String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model WeightRecord {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  date     String // YYYY-MM-DD, one per day
+  weightKg Float
+  source   String   @default("USER") // USER | ONBOARDING
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+}
+
+// ─────────────────────── Food domain ───────────────────────
+
+model Food {
+  id              String   @id @default(cuid())
+  nameFa          String
+  nameEn          String?
+  category        String // MAIN_DISH | RICE | BREAD | DAIRY | FRUIT | VEGETABLE | PROTEIN | SNACK | DRINK | FAST_FOOD | SWEET | OTHER
+  foodType        String   @default("DISH") // DISH | INGREDIENT | BRAND
+  isIranian       Boolean  @default(false)
+  source          String   @default("SEED") // SEED | AI_ESTIMATE | USER
+  confidence      Float    @default(1)
+  searchText      String // lower(nameFa + " " + nameEn) for search
+  // Per-100g baseline — deterministic source of truth
+  kcalPer100g     Float
+  proteinPer100g  Float
+  carbsPer100g    Float
+  fatPer100g      Float
+  fiberPer100g    Float?
+  sugarPer100g    Float?
+  sodiumMgPer100g Float?
+  isPublic        Boolean  @default(true)
+  imageUrl        String? // data URL (compressed JPEG) — admin-added food photo, optional
+  // Admin-curated plan option (برنامه‌ساز): a food only becomes a meal-plan
+  // candidate when the owner tags it with a budget tier + meal slots.
+  budgetLevel     String? // ECONOMY | MID | FLEXIBLE — null = not a plan option
+  mealSlotsJson   String? // JSON array of BREAKFAST | LUNCH | DINNER | SNACK — null = not plan-eligible
+  createdByUserId String?
+  createdBy       User?    @relation("CustomFoods", fields: [createdByUserId], references: [id])
+  servings        FoodServing[]
+  logItems        FoodLogItem[]
+  planItems       MealPlanItem[]
+  favorites       FavoriteFood[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([searchText])
+  @@index([category])
+  @@index([budgetLevel])
+}
+
+model FoodServing {
+  id        String  @id @default(cuid())
+  foodId    String
+  food      Food    @relation(fields: [foodId], references: [id])
+  labelFa   String // یک بشقاب، یک کفگیر، یک سیخ، یک عدد …
+  unitType  String // PLATE | LADLE | SPOON | GLASS | SKEWER | PIECE | CUP | SLICE | GRAM | CUSTOM
+  grams     Float
+  isDefault Boolean @default(false)
+
+  @@index([foodId])
+}
+
+model FoodLog {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  date      String // YYYY-MM-DD (user-local day)
+  mealType  String // BREAKFAST | LUNCH | SNACK | DINNER
+  source    String        @default("MANUAL") // SCAN | SEARCH | MANUAL | PLAN
+  note      String?
+  items     FoodLogItem[]
+  createdAt DateTime      @default(now())
+
+  @@index([userId, date])
+}
+
+model FoodLogItem {
+  id           String  @id @default(cuid())
+  logId        String
+  log          FoodLog @relation(fields: [logId], references: [id], onDelete: Cascade)
+  foodId       String?
+  food         Food?   @relation(fields: [foodId], references: [id])
+  nameFa       String // snapshot
+  grams        Float
+  servingLabel String? // display unit used, e.g. "یک بشقاب (~350 گرم)"
+  kcal         Float
+  proteinG     Float
+  carbsG       Float
+  fatG         Float
+  fiberG       Float?
+  sugarG       Float?
+  sodiumMg     Float?
+  confidence   Float? // AI confidence when scan-sourced
+  aiMetaJson   String? // scan provenance (model, raw estimates) — no image data
+
+  @@index([logId])
+}
+
+// ─────────────────────── Preferences ───────────────────────
+
+model DietPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  tag    String // VEGETARIAN | VEGAN | KETO | HIGH_PROTEIN | HALAL | LOW_CARB | GLUTEN_FREE | OTHER
+
+  @@unique([userId, tag])
+}
+
+model Allergy {
+  id       String  @id @default(cuid())
+  userId   String
+  user     User    @relation(fields: [userId], references: [id])
+  name     String // normalized Persian/English ingredient name
+  severity String? // MILD | SEVERE
+
+  @@unique([userId, name])
+}
+
+model DislikedFood {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  name   String
+
+  @@unique([userId, name])
+}
+
+model FavoriteFood {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  foodId    String
+  food      Food     @relation(fields: [foodId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, foodId])
+}
+
+// ─────────────────────── Meal plan ───────────────────────
+
+model MealPlan {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  startDate   String // YYYY-MM-DD (Saturday — Iranian week)
+  endDate     String
+  status      String        @default("ACTIVE") // ACTIVE | ARCHIVED
+  targetsJson String // daily targets snapshot used when generating
+  budgetLevel String? // budget tier this plan was generated for (ECONOMY | MID | FLEXIBLE)
+  source      String        @default("AI") // AI = owner-curated options + model selection | ENGINE = legacy deterministic
+  days        MealPlanDay[]
+  createdAt   DateTime      @default(now())
+
+  @@index([userId, status])
+}
+
+model MealPlanDay {
+  id          String         @id @default(cuid())
+  planId      String
+  plan        MealPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  date        String
+  dayIndex    Int // 0..6
+  budgetLevel String? // per-day budget tier when regenerated individually (ECONOMY | MID | FLEXIBLE) — null = plan default
+  items       MealPlanItem[]
+
+  @@unique([planId, dayIndex])
+}
+
+model MealPlanItem {
+  id           String       @id @default(cuid())
+  dayId        String
+  day          MealPlanDay  @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  mealType     String // BREAKFAST | LUNCH | SNACK | DINNER
+  foodId       String?
+  food         Food?        @relation(fields: [foodId], references: [id])
+  titleFa      String
+  grams        Float?
+  servingLabel String?
+  kcal         Int
+  proteinG     Int
+  carbsG       Int
+  fatG         Int
+  order        Int          @default(0)
+  status       String       @default("PLANNED") // PLANNED | EATEN | SWAPPED | SKIPPED
+
+  @@index([dayId, mealType])
+}
+
+// ─────────────────────── Water ───────────────────────
+
+model WaterLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  date      String // YYYY-MM-DD
+  amountMl  Int
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+// ─────────────────────── AI coach ───────────────────────
+
+model AIConversation {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  title     String?
+  messages  AIMessage[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+model AIMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // USER | ASSISTANT | SYSTEM
+  content        String
+  metaJson       String? // suggestion cards etc. — never food-log data
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+// ─────────────────────── Monetization ───────────────────────
+
+model Subscription {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id])
+  tier           String    @default("FREE_TRIAL") // FREE_TRIAL | PRO | EXPIRED
+  trialStartedAt DateTime?
+  trialEndsAt    DateTime?
+  scansUsed      Int       @default(0)
+  scansLimit     Int       @default(5)
+  proStartedAt   DateTime?
+  proExpiresAt   DateTime?
+  provider       String? // payment provider — never hardcoded
+  updatedAt      DateTime  @updatedAt
+}
+
+model PaymentOrder {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  planId      String // PRO_MONTHLY | PRO_YEARLY
+  provider    String // mock | zarinpal | … (never hardcoded per gateway)
+  amountToman Int
+  referenceId String @unique // provider-side reference/tracking id
+  status      String    @default("PENDING") // PENDING | PAID | FAILED | CANCELED
+  createdAt   DateTime  @default(now())
+  paidAt      DateTime?
+  metaJson    String? // provider payload snapshot — no credentials
+
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────── Gamification ───────────────────────
+
+model Achievement {
+  id          String            @id @default(cuid())
+  code        String            @unique // FIRST_MEAL, FIRST_SCAN, STREAK_7, STREAK_30, PROTEIN_WEEK, KCAL_WEEK …
+  titleFa     String
+  descriptionFa String
+  icon        String?
+  xp          Int               @default(0)
+  category    String            @default("GENERAL")
+  unlocked    UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([userId, achievementId])
+}
+
+model UserStats {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id])
+  currentStreak Int      @default(0)
+  longestStreak Int      @default(0)
+  xp            Int      @default(0)
+  level         Int      @default(1)
+  lastLogDate   String? // YYYY-MM-DD
+  updatedAt     DateTime @updatedAt
+}
+
+model LeaderboardRecord {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  period     String // WEEKLY | MONTHLY | ALL_TIME
+  score      Float // consistency/streak/healthy-behavior composite — never body weight
+  computedAt DateTime @default(now())
+
+  @@unique([userId, period])
+}
+
+model Challenge {
+  id          String                 @id @default(cuid())
+  code        String                 @unique
+  titleFa     String
+  descriptionFa String
+  kind        String
+  startsAt    DateTime?
+  endsAt      DateTime?
+  isActive    Boolean                @default(true)
+  participants ChallengeParticipant[]
+}
+
+model ChallengeParticipant {
+  id          String    @id @default(cuid())
+  challengeId String
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  joinedAt    DateTime  @default(now())
+
+  @@unique([challengeId, userId])
+}
+
+// ─────────────────────── System ───────────────────────
+
+model SystemSetting {
+  key       String   @id // e.g. "ai.openrouter.apiKey", "ai.openrouter.textModel"
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model NotificationPreference {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id])
+  pushEnabled           Boolean  @default(true)
+  mealReminder          Boolean  @default(true)
+  mealTimesJson         String? // ["08:30","13:00","17:00","21:00"]
+  waterReminder         Boolean  @default(true)
+  weeklyWeightReminder  Boolean  @default(true)
+  streakReminder        Boolean  @default(true)
+  weeklySummary         Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+}
+
+model ProgressRecord {
+  id               String  @id @default(cuid())
+  userId           String
+  user             User    @relation(fields: [userId], references: [id])
+  date             String // YYYY-MM-DD
+  kcalConsumed     Float   @default(0)
+  kcalTarget       Float?
+  proteinConsumedG Float   @default(0)
+  proteinTargetG   Float?
+  waterMl          Int     @default(0)
+  loggedMeals      Int     @default(0)
+  adherenceScore   Float? // 0..1 daily adherence
+
+  @@unique([userId, date])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  name      String // signup_completed, food_scanned, coach_message_sent … (no PII in props)
+  propsJson String?
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([userId, createdAt])
+}
