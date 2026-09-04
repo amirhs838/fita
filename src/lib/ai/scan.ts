@@ -32,13 +32,73 @@ const AiFoodSchema = z.object({
   per100g: Per100gSchema,
 })
 
+/** What the model is asked to return: ONE dish card (or isFood:false). */
+const AiDishCardSchema = z.object({
+  isFood: z.boolean(),
+  name: z.string().trim().max(80).default(''),
+  nameFa: z.string().trim().max(80).default(''),
+  estimatedGrams: z.number().min(0).max(2000).default(0),
+  confidence: z.number().min(0).max(1).default(0),
+  per100g: Per100gSchema.partial().default({}),
+})
+
 export const ScanResponseSchema = z.object({
-  foods: z.array(AiFoodSchema).max(10),
+  foods: z.array(AiFoodSchema).max(1),
   overallConfidence: z.number().min(0).max(1),
 })
 
 export type AiFood = z.infer<typeof AiFoodSchema>
 export type ScanResponse = z.infer<typeof ScanResponseSchema>
+
+/**
+ * Normalize whatever the model actually said into the ONE-dish contract:
+ *  - new shape      {isFood, name…, per100g}  → 0 or 1 foods
+ *  - legacy shape   {foods:[…]}               → dominant item by kcal contribution
+ *    (older prompt listed plate components separately; professional apps
+ *    report one meal card, so we keep only the dominant component)
+ */
+export function normalizeScanOutput(raw: unknown): { foods: AiFood[]; overallConfidence: number } {
+  if (raw && typeof raw === 'object' && Array.isArray((raw as { foods?: unknown }).foods)) {
+    const legacy = z
+      .object({ foods: z.array(AiFoodSchema).min(1).max(10), overallConfidence: z.number().min(0).max(1).optional() })
+      .safeParse(raw)
+    if (legacy.success) {
+      const dominant = [...legacy.data.foods].sort(
+        (a, b) => b.estimatedGrams * b.per100g.kcal - a.estimatedGrams * a.per100g.kcal,
+      )[0]
+      return {
+        foods: [dominant],
+        overallConfidence: legacy.data.overallConfidence ?? dominant.confidence,
+      }
+    }
+  }
+
+  const card = AiDishCardSchema.safeParse(raw)
+  if (!card.success) {
+    throw new AiError('AI_INVALID_RESPONSE', 'ساختار پاسخ مدل نامعتبر بود.')
+  }
+  const d = card.data
+  if (!d.isFood || !d.nameFa || !d.name) {
+    return { foods: [], overallConfidence: d.isFood ? d.confidence : 0 }
+  }
+  const per100g = {
+    kcal: d.per100g.kcal ?? 0,
+    protein: d.per100g.protein ?? 0,
+    carbs: d.per100g.carbs ?? 0,
+    fat: d.per100g.fat ?? 0,
+  }
+  const dish = AiFoodSchema.safeParse({
+    name: d.name,
+    nameFa: d.nameFa,
+    estimatedGrams: d.estimatedGrams,
+    confidence: d.confidence,
+    per100g,
+  })
+  if (!dish.success) {
+    throw new AiError('AI_INVALID_RESPONSE', 'ساختار پاسخ مدل نامعتبر بود.')
+  }
+  return { foods: [dish.data], overallConfidence: dish.data.confidence }
+}
 
 /** Model outputs sometimes arrive wrapped in ```json fences or prose. */
 export function extractJson(raw: string): unknown {
@@ -70,9 +130,8 @@ export async function runFoodScan(imageDataUrl: string): Promise<ScanResponse> {
         imageDataUrl,
         maxTokens: 900,
       })
-      const parsed = ScanResponseSchema.safeParse(extractJson(raw))
-      if (parsed.success) return parsed.data
-      lastError = new AiError('AI_INVALID_RESPONSE', 'ساختار پاسخ مدل نامعتبر بود.')
+      const parsed = normalizeScanOutput(extractJson(raw))
+      return parsed
     } catch (err) {
       if (err instanceof AiError) lastError = err
       else
@@ -148,14 +207,29 @@ const round1 = (n: number) => Math.round(n * 10) / 10
 export async function ensureFoodFromScan(
   item: AiFood,
   userId: string,
-): Promise<{ foodId: string; nameFa: string; kcalPer100g: number; matched: boolean }> {
+): Promise<{
+  foodId: string
+  nameFa: string
+  kcalPer100g: number
+  proteinPer100g: number
+  carbsPer100g: number
+  fatPer100g: number
+  matched: boolean
+}> {
   const match = await matchFoodToDb(item.name, item.nameFa, userId)
   if (match) {
     const food = await db.food.findUniqueOrThrow({
       where: { id: match.id },
-      select: { id: true, nameFa: true, kcalPer100g: true },
+      select: {
+        id: true,
+        nameFa: true,
+        kcalPer100g: true,
+        proteinPer100g: true,
+        carbsPer100g: true,
+        fatPer100g: true,
+      },
     })
-    return { foodId: food.id, nameFa: food.nameFa, kcalPer100g: food.kcalPer100g, matched: true }
+    return { foodId: food.id, nameFa: food.nameFa, kcalPer100g: food.kcalPer100g, proteinPer100g: food.proteinPer100g, carbsPer100g: food.carbsPer100g, fatPer100g: food.fatPer100g, matched: true }
   }
 
   const nameFa = item.nameFa.slice(0, 80)
@@ -176,7 +250,14 @@ export async function ensureFoodFromScan(
       isPublic: false,
       createdByUserId: userId,
     },
-    select: { id: true, nameFa: true, kcalPer100g: true },
+    select: {
+      id: true,
+      nameFa: true,
+      kcalPer100g: true,
+      proteinPer100g: true,
+      carbsPer100g: true,
+      fatPer100g: true,
+    },
   })
-  return { foodId: food.id, nameFa: food.nameFa, kcalPer100g: food.kcalPer100g, matched: false }
+  return { foodId: food.id, nameFa: food.nameFa, kcalPer100g: food.kcalPer100g, proteinPer100g: food.proteinPer100g, carbsPer100g: food.carbsPer100g, fatPer100g: food.fatPer100g, matched: false }
 }

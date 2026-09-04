@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Camera, Check, ImageUp, Loader2, Minus, PencilLine, Plus, ShieldCheck, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -97,10 +97,6 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
     }
   }, [open])
 
-  const totalKcal = useMemo(
-    () => items.reduce((s, it) => s + Math.round((it.kcalPer100g * it.grams) / 100), 0),
-    [items],
-  )
   const lowConfidence = result !== null && result.foods.length > 0 && result.overallConfidence < 0.5
 
   async function analyze(file: File) {
@@ -115,7 +111,15 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
         body: JSON.stringify({ imageDataUrl: dataUrl }),
       })
       setResult(data)
-      setItems(data.foods.map((f) => ({ ...f, grams: f.estimatedGrams })))
+      // Server now returns ONE dominant dish; this sort is purely defensive.
+      const dominant =
+        data.foods.length > 1
+          ? [...data.foods].sort(
+              (a, b) =>
+                b.estimatedGrams * b.kcalPer100g - a.estimatedGrams * a.kcalPer100g,
+            )[0]
+          : data.foods[0]
+      setItems(dominant ? [{ ...dominant, grams: dominant.estimatedGrams }] : [])
       setPhase('review')
     } catch (err) {
       setPreviewUrl(null)
@@ -362,67 +366,98 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-3.5">
-                    {previewUrl && (
-                      <img
-                        src={previewUrl}
-                        alt="عکس غذای اسکن‌شده"
-                        className="size-16 rounded-2xl object-cover"
-                      />
-                    )}
-                    <div className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">
-                      <p className="text-sm font-bold text-foreground">
-                        {enDigits(items.length)} مورد تشخیص داده شد
-                      </p>
-                      <p className="mt-0.5">تخمین مقدار تقریبی است؛ در صورت نیاز اصلاح کن.</p>
+                  {items.length > 1 && (
+                    <div role="alert" className="flex items-start gap-2 rounded-2xl bg-muted/60 p-3.5 text-xs leading-5">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                      <span>چند مورد برگشت؛ مهم‌ترین بخش بشقاب نشان داده شد.</span>
                     </div>
-                  </div>
+                  )}
 
                   {lowConfidence && (
                     <div role="alert" className="flex items-start gap-2 rounded-2xl bg-muted/60 p-3.5 text-xs leading-5">
                       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-                      <span>
-                        اطمینان تشخیص پایین است. مقدار و نام هر مورد را بررسی کن؛ مورد اشتباه را حذف کن.
-                      </span>
+                      <span>اطمینان تشخیص پایین است؛ نام و مقدار را قبل از ثبت بررسی کن.</span>
                     </div>
                   )}
 
-                  <ul className="scroll-thin max-h-64 divide-y divide-border/60 overflow-y-auto">
-                    {items.map((it) => {
-                      const conf = confidenceLabel(it.confidence)
-                      return (
-                        <li key={it.foodId} className="py-3">
-                          <div className="flex items-center gap-2.5">
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-bold">{it.nameFa}</span>
-                              <span className="mt-1 flex items-center gap-1.5">
-                                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', conf.className)}>
-                                  {conf.text}
-                                </span>
-                                {!it.matchedToDb && (
-                                  <span className="text-[10px] text-muted-foreground">مقدار مرجع تخمینی</span>
-                                )}
+                  {(() => {
+                    const it = items[0]
+                    const conf = confidenceLabel(it.confidence)
+                    const k = it.grams / 100
+                    const kcal = Math.round((it.kcalPer100g * it.grams) / 100)
+                    const macros = [
+                      { label: 'پروتئین', value: Math.round(it.proteinPer100g * k) },
+                      { label: 'کربوهیدرات', value: Math.round(it.carbsPer100g * k) },
+                      { label: 'چربی', value: Math.round(it.fatPer100g * k) },
+                    ]
+                    return (
+                      <div className="overflow-hidden rounded-3xl border border-border/70 bg-card">
+                        {/* identity row */}
+                        <div className="flex items-center gap-3.5 p-4">
+                          {previewUrl && (
+                            <img
+                              src={previewUrl}
+                              alt="عکس غذای اسکن‌شده"
+                              className="size-20 shrink-0 rounded-2xl object-cover"
+                            />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-medium text-muted-foreground">
+                              غذای تشخیص داده‌شده
+                            </p>
+                            <p className="mt-0.5 truncate text-lg font-bold leading-7">{it.nameFa}</p>
+                            <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', conf.className)}>
+                                {conf.text}
                               </span>
-                            </span>
-                            <span className="tnum shrink-0 text-sm font-bold">
-                              {enDigits(Math.round((it.kcalPer100g * it.grams) / 100))}
-                              <span className="text-[10px] font-normal text-muted-foreground"> kcal</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setItems((arr) => arr.filter((x) => x.foodId !== it.foodId))}
-                              aria-label={`حذف ${it.nameFa}`}
-                              className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                            >
-                              <X className="size-4" aria-hidden />
-                            </button>
+                              {!it.matchedToDb && (
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                                  مقدار مرجع تخمینی
+                                </span>
+                              )}
+                            </p>
                           </div>
+                          <button
+                            type="button"
+                            onClick={retry}
+                            aria-label="تشخیص اشتباه بود؛ عکس دیگر"
+                            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                          >
+                            <X className="size-4.5" aria-hidden />
+                          </button>
+                        </div>
 
-                          <div className="mt-2.5 flex items-center gap-2.5">
+                        {/* kcal + macros */}
+                        <div className="flex items-end justify-between border-y border-border/60 bg-brand-soft/40 px-4 py-3">
+                          <div>
+                            <p className="tnum text-3xl font-bold leading-none text-brand-strong">
+                              {enDigits(kcal)}
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">کیلوکالری تخمینی</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1.5">
+                            {macros.map((m) => (
+                              <p key={m.label} className="text-[11px] text-muted-foreground">
+                                {m.label}
+                                <span className="tnum ms-1.5 font-bold text-foreground">
+                                  {enDigits(m.value)}
+                                </span>
+                                <span className="ms-0.5 text-[10px]">گرم</span>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* portion control */}
+                        <div className="p-4">
+                          <p className="mb-2 text-xs font-medium text-muted-foreground">
+                            مقدار غذا — اگر تخمین اشتباه است اصلاح کن
+                          </p>
+                          <div className="flex items-center gap-3">
                             <Button
                               variant="outline"
                               size="icon"
-                              className="size-8 rounded-full"
+                              className="size-10 rounded-full"
                               aria-label="کمتر"
                               onClick={() =>
                                 setItems((arr) =>
@@ -434,15 +469,16 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
                                 )
                               }
                             >
-                              <Minus className="size-3.5" aria-hidden />
+                              <Minus className="size-4" aria-hidden />
                             </Button>
-                            <span className="tnum min-w-20 text-center text-sm font-bold">
-                              {enDigits(it.grams)} گرم
-                            </span>
+                            <div className="tnum flex-1 text-center">
+                              <span className="text-xl font-bold">{enDigits(it.grams)}</span>
+                              <span className="ms-1 text-xs text-muted-foreground">گرم</span>
+                            </div>
                             <Button
                               variant="outline"
                               size="icon"
-                              className="size-8 rounded-full"
+                              className="size-10 rounded-full"
                               aria-label="بیشتر"
                               onClick={() =>
                                 setItems((arr) =>
@@ -454,16 +490,30 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
                                 )
                               }
                             >
-                              <Plus className="size-3.5" aria-hidden />
+                              <Plus className="size-4" aria-hidden />
                             </Button>
-                            <span className="ms-auto text-[10px] text-muted-foreground">
-                              تخمین اولیه: {enDigits(it.estimatedGrams)} گرم
-                            </span>
                           </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
+                          {it.grams !== it.estimatedGrams && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setItems((arr) =>
+                                  arr.map((x) =>
+                                    x.foodId === it.foodId
+                                      ? { ...x, grams: x.estimatedGrams }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              className="mt-2 w-full cursor-pointer text-center text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                            >
+                              بازگشت به تخمین هوشمند: {enDigits(it.estimatedGrams)} گرم
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   <div>
                     <p className="mb-2 text-xs font-medium text-muted-foreground">ثبت در وعده</p>
@@ -484,14 +534,6 @@ export function ScanSheet({ open, onOpenChange, onLogged, onManualEntry, onOpenP
                         </button>
                       ))}
                     </div>
-                  </div>
-
-                  <div className="flex items-center justify-between border-t border-border/60 pt-3">
-                    <span className="text-[13px] text-muted-foreground">جمع تخمینی</span>
-                    <span className="tnum text-lg font-bold">
-                      {enDigits(totalKcal)}
-                      <span className="ms-1 text-[11px] font-normal text-muted-foreground">kcal</span>
-                    </span>
                   </div>
 
                   <Button

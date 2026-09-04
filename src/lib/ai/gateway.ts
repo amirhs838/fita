@@ -65,6 +65,31 @@ async function openRouterCall(model: string, messages: unknown[], key: string): 
     throw new AiError('AI_UNAVAILABLE', 'سرویس هوش مصنوعی در دسترس نیست.')
   }
   if (!res.ok) {
+    // Read the provider's error body so failures become actionable in Persian.
+    let detail = ''
+    try {
+      const body = (await res.json()) as { error?: { message?: string; code?: string } }
+      detail = (body.error?.message ?? body.error?.code ?? '').toLowerCase()
+    } catch {
+      // body unreadable — fall through to the status-based mapping
+    }
+    if (res.status === 404 || detail.includes('no endpoints') || detail.includes('not found')) {
+      throw new AiError(
+        'AI_UNAVAILABLE',
+        `مدل «${model}» در OpenRouter پیدا نشد — در پنل ادمین اسم مدل را اصلاح کن.`,
+      )
+    }
+    if (
+      detail.includes('image') ||
+      detail.includes('modalit') ||
+      detail.includes('multimodal') ||
+      detail.includes('input_format')
+    ) {
+      throw new AiError(
+        'AI_UNAVAILABLE',
+        `مدل «${model}» عکس قبول نمی‌کند — در پنل ادمین یک مدل بینایی انتخاب کن (مثل minimax/minimax-m3:free).`,
+      )
+    }
     throw new AiError('AI_UNAVAILABLE', `سرویس هوش مصنوعی خطا برگرداند (${res.status}).`)
   }
   const json = (await res.json()) as { choices?: { message?: { content?: string } }[] }
@@ -170,8 +195,12 @@ const mockProvider: AiProvider = {
   },
   async analyzeImage() {
     return JSON.stringify({
-      foods: [{ name: 'rice', nameFa: 'برنج', estimatedGrams: 220, confidence: 0.6 }],
-      overallConfidence: 0.6,
+      isFood: true,
+      name: 'rice and stew',
+      nameFa: 'برنج با خورشت',
+      estimatedGrams: 420,
+      confidence: 0.65,
+      per100g: { kcal: 150, protein: 5, carbs: 22, fat: 4 },
     })
   },
 }

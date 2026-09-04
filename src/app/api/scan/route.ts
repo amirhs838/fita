@@ -79,6 +79,9 @@ export async function POST(req: NextRequest) {
             matchedToDb: match.matched,
             estimatedGrams: Math.round(food.estimatedGrams),
             kcalPer100g: match.kcalPer100g,
+            proteinPer100g: match.proteinPer100g,
+            carbsPer100g: match.carbsPer100g,
+            fatPer100g: match.fatPer100g,
             confidence: Math.round(food.confidence * 100) / 100,
           }
         }),
