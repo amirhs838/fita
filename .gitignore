@@ -63,3 +63,6 @@ worklog.md
 .zscripts/
 examples/
 Caddyfile
+upload/
+download/
+tests/
