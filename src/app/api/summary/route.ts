@@ -4,6 +4,7 @@ import { ApiError, handleError, ok } from '@/lib/api'
 import { requireUser } from '@/lib/auth'
 import { isValidDayKey } from '@/lib/date'
 import { computeTargets, type ActivityLevel, type ComputedTargets, type Gender, type GoalType } from '@/lib/nutrition/engine'
+import { buildComputeOptions } from '@/lib/nutrition/calibration-data'
 import { db } from '@/lib/db'
 
 const QuerySchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
         },
         goal.type as GoalType,
         goal.targetWeightKg,
+        await buildComputeOptions(user.id),
       )
     }
 

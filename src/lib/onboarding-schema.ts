@@ -6,7 +6,7 @@ import type { ActivityLevel, BudgetLevel, DietTag, Gender, GoalType } from '@/li
 export const onboardingSchema = z.object({
   name: z.string().trim().min(2, 'نام را کامل وارد کن.').max(60),
   gender: z.enum(['MALE', 'FEMALE']),
-  age: z.number().int().min(13, 'فیتا برای زیر 13 سال مناسب نیست.').max(90),
+  age: z.number().int().min(10, 'سن واردشده خیلی کم است.').max(100, 'سن واردشده خیلی زیاد است.'),
   heightCm: z.number().min(100).max(230),
   currentWeightKg: z.number().min(35).max(250),
   goalType: z.enum(['LOSE_WEIGHT', 'MAINTAIN', 'GAIN_WEIGHT', 'BUILD_MUSCLE', 'RECOMP']),

@@ -8,6 +8,7 @@ export const GOAL_LABEL: Record<GoalType, string> = {
   GAIN_WEIGHT: 'افزایش وزن',
   BUILD_MUSCLE: 'عضله‌سازی',
   RECOMP: 'ری‌کامپ',
+  CUSTOM: 'هدف سفارشی',
 }
 
 export const GOAL_HINT: Record<GoalType, string> = {
@@ -16,6 +17,7 @@ export const GOAL_HINT: Record<GoalType, string> = {
   GAIN_WEIGHT: 'افزایش وزن سالم و کنترل‌شده',
   BUILD_MUSCLE: 'عضله‌سازی با پروتئین کافی',
   RECOMP: 'کاهش چربی و حفظ عضله همزمان',
+  CUSTOM: 'بر اساس نیاز تو تنظیم می‌شود',
 }
 
 export const ACTIVITY_LABEL: Record<ActivityLevel, { title: string; hint: string }> = {

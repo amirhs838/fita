@@ -3,6 +3,7 @@ import { handleError, ok } from '@/lib/api'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { computeTargets, type ActivityLevel, type ComputedTargets, type Gender, type GoalType } from '@/lib/nutrition/engine'
+import { buildComputeOptions } from '@/lib/nutrition/calibration-data'
 import { ensureStats, XP_PER_LEVEL } from '@/lib/gamification'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -42,6 +43,7 @@ export async function GET(_req: NextRequest) {
         },
         goal.type as GoalType,
         goal.targetWeightKg,
+        await buildComputeOptions(user.id),
       )
     }
 

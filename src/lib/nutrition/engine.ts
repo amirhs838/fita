@@ -1,53 +1,35 @@
-import { AppConfig } from '@/lib/config'
+import {
+  ACTIVITY_FACTORS,
+  CALCULATION_ENGINE_VERSION,
+  calculateNutritionTargets,
+} from './index'
+import type {
+  ActivityLevel,
+  CalculationResult,
+  ConfidenceLevel,
+  DietTag,
+  EnergyCalibrationInput,
+  EngineMeasurements,
+  EngineWarning,
+  Gender,
+  GoalType,
+} from './types'
 
 /**
  * Fita Nutrition Engine — 100% deterministic, AI-free, testable.
- * Method documentation lives inline; version-tagged via `method` on outputs.
- * See ARCHITECTURE.md §3 for the full spec.
+ *
+ * This file is the BACKWARD-COMPATIBLE façade (§59): every legacy consumer
+ * keeps its exact contract (computeTargets / validateTargetWeight / …) while
+ * the math lives in the modular engine v2 under src/lib/nutrition/.
+ * Methodology: docs/calculation-methodology.md
  */
 
-export type Gender = 'MALE' | 'FEMALE'
-export type ActivityLevel = 'SEDENTARY' | 'LIGHT' | 'MODERATE' | 'ACTIVE' | 'VERY_ACTIVE'
-export type GoalType = 'LOSE_WEIGHT' | 'MAINTAIN' | 'GAIN_WEIGHT' | 'BUILD_MUSCLE' | 'RECOMP'
+export type { Gender, ActivityLevel, GoalType, DietTag } from './types'
 export type BudgetLevel = 'ECONOMY' | 'MID' | 'FLEXIBLE'
-export type DietTag =
-  | 'NORMAL'
-  | 'VEGETARIAN'
-  | 'VEGAN'
-  | 'KETO'
-  | 'HIGH_PROTEIN'
-  | 'HALAL'
-  | 'LOW_CARB'
-  | 'GLUTEN_FREE'
 
-/** Physical activity level multipliers (standard TDEE factors). */
-export const ACTIVITY_FACTORS: Record<ActivityLevel, number> = {
-  SEDENTARY: 1.2,
-  LIGHT: 1.375,
-  MODERATE: 1.55,
-  ACTIVE: 1.725,
-  VERY_ACTIVE: 1.9,
-}
+export { ACTIVITY_FACTORS }
 
-/** Protein grams per kg of reference (target) weight, per goal. */
-const PROTEIN_G_PER_KG: Record<GoalType, number> = {
-  LOSE_WEIGHT: 2.0,
-  MAINTAIN: 1.6,
-  GAIN_WEIGHT: 1.6,
-  BUILD_MUSCLE: 1.9,
-  RECOMP: 2.0,
-}
-
-/** TDEE adjustment per goal (fraction). */
-const GOAL_TDEE_DELTA: Record<GoalType, number> = {
-  LOSE_WEIGHT: -0.15,
-  MAINTAIN: 0,
-  GAIN_WEIGHT: 0.1,
-  BUILD_MUSCLE: 0.1,
-  RECOMP: -0.05,
-}
-
-export const ENGINE_METHOD = 'mifflin-st-jeor@1'
+export const ENGINE_METHOD = `nutrition-engine@${CALCULATION_ENGINE_VERSION}`
 
 export interface EngineProfile {
   gender: Gender
@@ -72,9 +54,17 @@ export interface ComputedTargets {
   warnings: string[]
 }
 
+/** Optional engine enrichments — existing call sites stay valid without it. */
+export interface ComputeOptions {
+  measurements?: EngineMeasurements | null
+  calibration?: EnergyCalibrationInput | null
+  dietTags?: DietTag[]
+  paceKgPerWeek?: number | null
+}
+
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
 
-/** BMR — Mifflin-St Jeor (1990), the most validated general-population equation. */
+/** RMR — Mifflin-St Jeor (1990); kept for legacy direct callers. */
 export function calcBmr(input: {
   gender: Gender
   weightKg: number
@@ -85,97 +75,63 @@ export function calcBmr(input: {
   return Math.round(input.gender === 'MALE' ? base + 5 : base - 161)
 }
 
-/** BMI (kg/m²) — auxiliary indicator only, never a decision-maker alone. */
+/** BMI (kg/m²) — auxiliary indicator only, never a decision-maker alone (§21). */
 export function calcBmi(weightKg: number, heightCm: number): number {
   const m = heightCm / 100
   return Math.round((weightKg / (m * m)) * 10) / 10
 }
 
-/** Conservative special-state energy additions (IOM-based, documented in ARCHITECTURE.md). */
-function specialStateDelta(p: EngineProfile): { delta: number; warnings: string[] } {
-  let delta = 0
-  const warnings: string[] = []
-  if (p.pregnancy) {
-    delta += 340
-    warnings.push('در بارداری، توصیه‌های فیتا محافظه‌کارانه است؛ برای تغییر رژیم با پزشکت مشورت کن.')
+/** Legacy warning strings stay UI-stable; codes remain available on the full result. */
+function warningStrings(warnings: EngineWarning[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const w of warnings) {
+    if (!seen.has(w.messageFa)) {
+      seen.add(w.messageFa)
+      out.push(w.messageFa)
+    }
   }
-  if (p.breastfeeding) {
-    delta += 500
-    warnings.push('در دوره شیردهی به انرژی بیشتری نیاز داری؛ برنامه به‌صورت محافظه‌کارانه تنظیم شده است.')
-  }
-  return { delta, warnings }
+  return out
 }
 
 /**
- * Full target computation: BMR → TDEE → goal adjustment → safety floors → macros → fiber.
- * Guarantees: never below safety floors; no deficit during pregnancy/breastfeeding.
+ * Full target computation — now a thin adapter over engine v2
+ * (calculateNutritionTargets). Guarantees unchanged: never below safety
+ * floors; no deficit during pregnancy/breastfeeding; deterministic.
  */
 export function computeTargets(
   p: EngineProfile,
   goalType: GoalType,
   targetWeightKg?: number | null,
+  options?: ComputeOptions,
 ): ComputedTargets {
-  const warnings: string[] = []
-
-  const bmr = calcBmr({ gender: p.gender, weightKg: p.currentWeightKg, heightCm: p.heightCm, age: p.age })
-  const tdee = Math.round(bmr * ACTIVITY_FACTORS[p.activityLevel])
-
-  const special = specialStateDelta(p)
-  warnings.push(...special.warnings)
-
-  let delta = GOAL_TDEE_DELTA[goalType]
-  // Safety: never run a deficit during pregnancy/breastfeeding.
-  if ((p.pregnancy || p.breastfeeding) && delta < 0) {
-    delta = 0
-    warnings.push('در این شرایط خاص، کاهش کالری توصیه نمی‌شود؛ هدف حفظ سلامت تو است.')
-  }
-
-  let kcal = Math.round(tdee * (1 + delta)) + special.delta
-
-  // Hard safety floors.
-  const floor =
-    p.gender === 'MALE' ? AppConfig.safety.minKcalMale : AppConfig.safety.minKcalFemale
-  if (!(p.pregnancy || p.breastfeeding) && kcal < floor) {
-    kcal = floor
-    warnings.push('برای حفظ سلامتی، کالری روزانه از کف ایمنی پایین‌تر نرفت.')
-  }
-  if (p.pregnancy || p.breastfeeding) {
-    kcal = Math.max(kcal, tdee + special.delta)
-  }
-
-  // ── Macros ──
-  // Protein: goal-based g/kg on reference (target) weight; capped at 35% of energy.
-  const refKg =
-    targetWeightKg && targetWeightKg > 0 && Math.abs(targetWeightKg - p.currentWeightKg) < 60
-      ? targetWeightKg
-      : p.currentWeightKg
-  let proteinG = Math.round(refKg * PROTEIN_G_PER_KG[goalType])
-  proteinG = Math.min(proteinG, Math.floor((kcal * 0.35) / 4))
-  proteinG = clamp(proteinG, Math.round(refKg * 1.2), Math.round(refKg * 2.4))
-  proteinG = Math.min(proteinG, Math.floor((kcal * 0.35) / 4))
-
-  // Fat: 27% of energy (min 0.8 g/kg, max 32% of energy).
-  let fatG = Math.round((kcal * 0.27) / 9)
-  fatG = Math.max(fatG, Math.round(refKg * 0.8))
-  fatG = Math.min(fatG, Math.floor((kcal * 0.32) / 9))
-
-  // Carbs: remainder with a 50g floor.
-  const carbG = Math.max(50, Math.round((kcal - proteinG * 4 - fatG * 9) / 4))
-
-  // Fiber: 14g per 1000 kcal (IOM), clamped 25–40g.
-  const fiberG = clamp(Math.round((kcal / 1000) * 14), 25, 40)
-
+  const result = calculateNutritionTargets(
+    {
+      gender: p.gender,
+      age: p.age,
+      heightCm: p.heightCm,
+      currentWeightKg: p.currentWeightKg,
+      activityLevel: p.activityLevel,
+      pregnancy: p.pregnancy,
+      breastfeeding: p.breastfeeding,
+      paceKgPerWeek: options?.paceKgPerWeek ?? null,
+      dietTags: options?.dietTags,
+      measurements: options?.measurements ?? null,
+      calibration: options?.calibration ?? null,
+    },
+    { goalType, targetWeightKg: targetWeightKg ?? null },
+  )
   return {
     method: ENGINE_METHOD,
-    bmr,
-    tdee,
-    kcal,
-    proteinG,
-    carbG,
-    fatG,
-    fiberG,
-    bmi: calcBmi(p.currentWeightKg, p.heightCm),
-    warnings,
+    bmr: result.rmr,
+    tdee: result.estimatedTdee,
+    kcal: result.targetCalories,
+    proteinG: result.proteinGrams,
+    carbG: result.carbohydrateGrams,
+    fatG: result.fatGrams,
+    fiberG: result.fiberGrams,
+    bmi: result.bmi,
+    warnings: warningStrings(result.warnings),
   }
 }
 
@@ -185,8 +141,8 @@ export interface TargetValidation {
 }
 
 /**
- * Goal-weight sanity checks (prompt §7): warn on unrealistic, hard-reject on unsafe.
- * Warnings are advisory and shown in UI; `ok:false` is a hard server-side rejection.
+ * Goal-weight sanity checks (§7/§36/§37): warn on unrealistic, hard-reject on
+ * unsafe. Warnings are advisory UI strings; `ok:false` is a hard server rejection.
  */
 export function validateTargetWeight(input: {
   gender: Gender
@@ -200,7 +156,7 @@ export function validateTargetWeight(input: {
   const deltaKg = targetWeightKg - currentWeightKg
   const bmiTarget = calcBmi(targetWeightKg, heightCm)
 
-  // Hard safety rejections.
+  // Hard safety rejections (§35/§36).
   if (bmiTarget < 16.5) {
     return { ok: false, warnings: ['وزن هدف انتخابی خیلی پایین و ناامن است.'] }
   }
@@ -231,7 +187,7 @@ export function validateTargetWeight(input: {
   return { ok: true, warnings }
 }
 
-/** Suggested goal weight ("پیشنهاد فیتا") — conservative starting point. */
+/** Suggested goal weight («پیشنهاد فیتا») — conservative starting point, NOT an ideal-weight claim (§20). */
 export function suggestTargetWeight(
   currentWeightKg: number,
   goalType: GoalType,
@@ -242,6 +198,12 @@ export function suggestTargetWeight(
     case 'GAIN_WEIGHT':
       return Math.round(currentWeightKg * 1.05)
     default:
-      return null // MAINTAIN/RECOMP/BUILD_MUSCLE: keep current weight as reference
+      return null
   }
 }
+
+/** Full v2 result for callers that want confidence/method metadata (§40/§41). */
+export type { CalculationResult, ConfidenceLevel, EngineWarning, EnergyCalibrationInput, EngineMeasurements }
+
+/** Exposed so admin/debug tooling can show the active engine version (§58). */
+export const ENGINE_VERSION = CALCULATION_ENGINE_VERSION
