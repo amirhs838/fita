@@ -2,6 +2,19 @@
 
 export type SubscriptionTier = 'FREE_TRIAL' | 'PRO' | 'EXPIRED'
 
+/** Latest body snapshot for Profile → «اطلاعات بدنی» editing. */
+export interface BodySnapshot {
+  heightCm: number | null
+  currentWeightKg: number | null
+  waistCm: number | null
+  hipCm: number | null
+  neckCm: number | null
+  armCm: number | null
+  thighCm: number | null
+  /** Day key (YYYY-MM-DD) of the latest measurement row — null when never measured. */
+  measuredAt: string | null
+}
+
 export interface MeData {
   user: {
     id: string
@@ -16,6 +29,7 @@ export interface MeData {
     mealsPerDay: number
     budgetLevel: string | null
   } | null
+  body: BodySnapshot | null
   onboarded: boolean
   goal: {
     type: string
@@ -348,6 +362,39 @@ export interface ProgressData {
     xpToNextLevel: number
   }
   consistency: { days: { date: string; logged: boolean }[] }
+}
+
+export type TrendRange = '1w' | '1m' | '3m' | '6m' | '1y'
+export type TrendMetric = 'weight' | 'bodyFat' | 'calories'
+
+export interface TrendPoint {
+  /** Day key / bucket-start key (YYYY-MM-DD). */
+  date: string
+  value: number
+}
+
+/** GET /api/progress/trends — range-aware series for the Progress charts. */
+export interface TrendsData {
+  range: TrendRange
+  start: string
+  end: string
+  bucket: 'day' | 'week' | 'month'
+  goalType: string | null
+  weight: {
+    points: TrendPoint[]
+    targetKg: number | null
+    currentKg: number | null
+  }
+  bodyFat: {
+    /** Estimated per measurement via Navy→RFM (points only where estimable). */
+    points: TrendPoint[]
+  }
+  calories: {
+    points: TrendPoint[]
+    targetKcal: number | null
+    avgKcal: number | null
+    loggedDays: number
+  }
 }
 
 export interface AchievementsData {

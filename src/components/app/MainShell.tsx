@@ -103,6 +103,7 @@ export function MainShell({ me, onLogout, onRefreshMe }: MainShellProps) {
                 onLogout={onLogout}
                 onOpenSubscription={() => setPaywallOpen(true)}
                 onOpenNotifications={() => setNotifOpen(true)}
+                onRefreshMe={onRefreshMe}
               />
             )}
           </motion.div>

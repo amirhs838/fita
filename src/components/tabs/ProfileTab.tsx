@@ -4,6 +4,7 @@ import { Bell, LogOut, Loader2, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ListGroup, ListRow, ListSeparator } from '@/components/fita/List'
+import { BodyInfoSheet } from '@/components/profile/BodyInfoSheet'
 import { PrivacySheet } from '@/components/settings/PrivacySheet'
 import { api, clearToken } from '@/lib/client'
 import type { MeData, SubscriptionTier } from '@/lib/types'
@@ -33,12 +34,25 @@ interface ProfileTabProps {
   onLogout: () => void
   onOpenSubscription?: () => void
   onOpenNotifications?: () => void
+  /** Reloads /api/me after body-info edits so values refresh. */
+  onRefreshMe?: () => void
 }
 
-export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotifications }: ProfileTabProps) {
+export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotifications, onRefreshMe }: ProfileTabProps) {
   const initial = me.user.name?.trim()[0] ?? 'ف'
   const [loggingOut, setLoggingOut] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
+  const [bodyOpen, setBodyOpen] = useState(false)
+
+  const bodySummary = (() => {
+    const b = me.body
+    if (!b) return undefined
+    const parts: string[] = []
+    if (b.heightCm != null) parts.push(`قد ${enDigits(Math.round(b.heightCm))}`)
+    if (b.currentWeightKg != null) parts.push(`وزن ${enDigits(Math.round(b.currentWeightKg))}`)
+    if (b.armCm != null) parts.push(`بازو ${enDigits(Math.round(b.armCm))}`)
+    return parts.length > 0 ? parts.join(' · ') : undefined
+  })()
 
   async function handleLogout() {
     setLoggingOut(true)
@@ -87,6 +101,7 @@ export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotificatio
                 ? `${enDigits(me.profile.currentWeightKg)} کیلو · ${enDigits(me.profile.heightCm)} سانتی‌متر`
                 : undefined
             }
+            onClick={() => setBodyOpen(true)}
           />
           <ListSeparator />
           <ListRow
@@ -107,7 +122,12 @@ export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotificatio
             }
           />
           <ListSeparator />
-          <ListRow title="اطلاعات بدنی" value={me.profile?.activityLevel ? 'ثبت‌شده' : undefined} />
+          <ListRow
+            title="اطلاعات بدنی"
+            subtitle="قد، وزن و دور اندام‌ها"
+            value={bodySummary}
+            onClick={() => setBodyOpen(true)}
+          />
         </ListGroup>
       </section>
 
@@ -142,7 +162,7 @@ export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotificatio
       <p className="px-1 text-xs leading-6 text-muted-foreground">
         {me.subscription.tier === 'PRO'
           ? 'فیتا پلاس فعال است — اسکن و مربی نامحدود.'
-          : 'ویرایش بخش‌های پروفایل به‌زودی اضافه می‌شود.'}
+          : 'اطلاعات بدنی را به‌روز نگه دار تا محاسبات کالری دقیق بماند.'}
       </p>
 
       <Button
@@ -158,6 +178,13 @@ export function ProfileTab({ me, onLogout, onOpenSubscription, onOpenNotificatio
       <p className="pt-1 pb-2 text-center text-[11px] text-muted-foreground">
         فیتا — نسخه {enDigits('0.1')}
       </p>
+
+      <BodyInfoSheet
+        open={bodyOpen}
+        onOpenChange={setBodyOpen}
+        me={me}
+        onSaved={() => onRefreshMe?.()}
+      />
 
       <PrivacySheet
         open={privacyOpen}

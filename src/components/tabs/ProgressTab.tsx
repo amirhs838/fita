@@ -1,11 +1,25 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Flame, Loader2, Minus, Plus, TrendingDown, TrendingUp } from 'lucide-react'
+import { motion } from 'framer-motion'
+import {
+  Flame,
+  Loader2,
+  Minus,
+  Percent,
+  Plus,
+  Ruler,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  UtensilsCrossed,
+  type LucideIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { TrendChart } from '@/components/charts/TrendChart'
 import { ErrorState } from '@/components/fita/States'
 import { api } from '@/lib/client'
 import { enDigits } from '@/lib/phone'
@@ -15,7 +29,9 @@ import type {
   AchievementsData,
   LeaderboardData,
   ProgressData,
-  WeightData,
+  TrendMetric,
+  TrendRange,
+  TrendsData,
 } from '@/lib/types'
 
 function fmtInt(n: number): string {
@@ -35,78 +51,48 @@ function shortFaDate(date: string): string {
   }
 }
 
-/** Custom light SVG line chart — monochrome, RTL-safe axis order. Tone via className (currentColor). */
-function WeightChart({ records, targetKg, className }: { records: { date: string; weightKg: number }[]; targetKg: number | null; className?: string }) {
-  const W = 320
-  const H = 130
-  const PAD = 10
-
-  const points = records.slice(-30)
-  if (points.length < 2) {
-    return (
-      <p className="py-8 text-center text-xs text-muted-foreground">
-        برای رسم روند، حداقل دو بار وزن ثبت کن.
-      </p>
-    )
+function monthFaDate(date: string): string {
+  const d = new Date(`${date}T12:00:00`)
+  try {
+    return new Intl.DateTimeFormat('fa-IR-u-nu-latn', { month: 'short' }).format(d)
+  } catch {
+    return ''
   }
+}
 
-  const values = points.map((p) => p.weightKg)
-  if (targetKg) values.push(targetKg)
-  const min = Math.min(...values) - 1
-  const max = Math.max(...values) + 1
-  const x = (i: number) => PAD + (i * (W - PAD * 2)) / (points.length - 1)
-  const y = (v: number) => PAD + ((max - v) * (H - PAD * 2)) / (max - min || 1)
+const METRICS: {
+  key: TrendMetric
+  label: string
+  unit: string
+  tone: 'brand' | 'ink' | 'energy'
+  icon: LucideIcon
+  caption: string
+}[] = [
+  { key: 'weight', label: 'وزن', unit: 'کیلوگرم', tone: 'brand', icon: Scale, caption: 'وزن فعلی' },
+  { key: 'bodyFat', label: 'چربی بدن', unit: 'درصد', tone: 'ink', icon: Percent, caption: 'آخرین تخمین چربی' },
+  { key: 'calories', label: 'کالری', unit: 'کالری', tone: 'energy', icon: Flame, caption: 'میانگین روز ثبت‌شده' },
+]
 
-  const line = points.map((p, i) => `${x(i)},${y(p.weightKg)}`).join(' ')
-  const area = `${PAD},${H - PAD} ${line} ${W - PAD},${H - PAD}`
-  const last = points.at(-1)!
+const RANGES: { key: TrendRange; label: string }[] = [
+  { key: '1w', label: 'هفته' },
+  { key: '1m', label: 'ماه' },
+  { key: '3m', label: '3 ماه' },
+  { key: '6m', label: '6 ماه' },
+  { key: '1y', label: 'سال' },
+]
 
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className={cn('w-full', className)} role="img" aria-label="نمودار وزن">
-      <defs>
-        <linearGradient id="wt-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.1" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {targetKg !== null && (
-        <g>
-          <line
-            x1={PAD}
-            y1={y(targetKg)}
-            x2={W - PAD}
-            y2={y(targetKg)}
-            strokeDasharray="3 5"
-            stroke="currentColor"
-            strokeOpacity="0.3"
-            strokeWidth="1"
-          />
-          <text x={W - PAD} y={y(targetKg) - 4} textAnchor="end" fontSize="8" fill="currentColor" fillOpacity="0.45">
-            هدف {fmtNum(targetKg)}
-          </text>
-        </g>
-      )}
-      <polygon points={area} fill="url(#wt-grad)" />
-      <polyline points={line} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
-      {points.map((p, i) => (
-        <circle
-          key={p.date}
-          cx={x(i)}
-          cy={y(p.weightKg)}
-          r={i === points.length - 1 ? 3.5 : 1.75}
-          fill="currentColor"
-          stroke="var(--background)"
-          strokeWidth={i === points.length - 1 ? 1.5 : 0}
-        />
-      ))}
-      <text x={PAD} y={H - 1} fontSize="8" fill="currentColor" fillOpacity="0.45">
-        {shortFaDate(points[0].date)}
-      </text>
-      <text x={W - PAD} y={H - 1} textAnchor="end" fontSize="8" fill="currentColor" fillOpacity="0.45">
-        {shortFaDate(last.date)}
-      </text>
-    </svg>
-  )
+const EMPTY_HINTS: Record<TrendMetric, { icon: LucideIcon; text: string }> = {
+  weight: { icon: Scale, text: 'برای رسم روند وزن، حداقل در دو روز مختلف وزن ثبت کن.' },
+  bodyFat: { icon: Ruler, text: 'برای تخمین چربی بدن، دور کمر و گردن را در پروفایل ثبت کن.' },
+  calories: { icon: UtensilsCrossed, text: 'در این بازه غذایی ثبت نشده — از دیاری شروع کن.' },
+}
+
+type DeltaTone = 'good' | 'off' | 'neutral'
+
+const CHIP_TONE: Record<DeltaTone, string> = {
+  good: 'bg-positive/10 text-positive',
+  off: 'bg-energy-soft text-energy-strong',
+  neutral: 'bg-muted text-muted-foreground',
 }
 
 export function ProgressTab() {
@@ -119,6 +105,13 @@ export function ProgressTab() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [weightInput, setWeightInput] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // ── Trends (charts) ──
+  const [metric, setMetric] = useState<TrendMetric>('weight')
+  const [range, setRange] = useState<TrendRange>('1m')
+  const [trendsByRange, setTrendsByRange] = useState<Partial<Record<TrendRange, TrendsData>>>({})
+  const [trendsLoading, setTrendsLoading] = useState(true)
+  const [trendsError, setTrendsError] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -139,9 +132,114 @@ export function ProgressTab() {
     }
   }, [])
 
+  const loadTrends = useCallback(async (r: TrendRange) => {
+    setTrendsLoading(true)
+    setTrendsError(false)
+    try {
+      const data = await api<TrendsData>(`/api/progress/trends?range=${r}`)
+      setTrendsByRange((prev) => ({ ...prev, [r]: data }))
+    } catch {
+      setTrendsError(true)
+    } finally {
+      setTrendsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void loadTrends(range)
+  }, [range, loadTrends])
+
+  const trends = trendsByRange[range]
+  const metricInfo = METRICS.find((m) => m.key === metric) ?? METRICS[0]
+
+  const metricPoints = useMemo(() => {
+    if (!trends) return []
+    if (metric === 'weight') return trends.weight.points
+    if (metric === 'bodyFat') return trends.bodyFat.points
+    return trends.calories.points
+  }, [trends, metric])
+
+  const bigValue = useMemo(() => {
+    if (!trends) return null
+    if (metric === 'calories') {
+      return trends.calories.avgKcal != null ? fmtInt(trends.calories.avgKcal) : null
+    }
+    const pts = metric === 'weight' ? trends.weight.points : trends.bodyFat.points
+    if (metric === 'weight' && pts.length === 0 && trends.weight.currentKg != null) {
+      return fmtNum(trends.weight.currentKg)
+    }
+    if (pts.length === 0) return null
+    return fmtNum(pts[pts.length - 1].value)
+  }, [trends, metric])
+
+  const delta = useMemo<{ tone: DeltaTone; dir: 'up' | 'down' | 'flat'; num: string; suffix?: string } | null>(() => {
+    if (!trends) return null
+    if (metric === 'calories') {
+      const avg = trends.calories.avgKcal
+      const t = trends.calories.targetKcal
+      if (avg == null) return null
+      if (t == null || t === 0) return { tone: 'neutral', dir: 'flat', num: fmtInt(avg), suffix: 'میانگین بازه' }
+      const d = Math.round(avg - t)
+      const sign = d < 0 ? '−' : '+'
+      const tone: DeltaTone = Math.abs(d) <= t * 0.075 ? 'good' : 'neutral'
+      return { tone, dir: d < 0 ? 'down' : 'up', num: `${sign}${fmtInt(Math.abs(d))}`, suffix: 'نسبت به هدف' }
+    }
+    const pts = metric === 'weight' ? trends.weight.points : trends.bodyFat.points
+    if (pts.length < 2) return null
+    const d = Math.round((pts[pts.length - 1].value - pts[0].value) * 10) / 10
+    if (d === 0) return { tone: 'neutral', dir: 'flat', num: fmtNum(0) }
+    const dir = d < 0 ? 'down' : 'up'
+    let tone: DeltaTone = 'neutral'
+    if (metric === 'bodyFat') {
+      tone = d < 0 ? 'good' : 'off'
+    } else if (trends.goalType === 'GAIN_WEIGHT' || trends.goalType === 'BUILD_MUSCLE') {
+      tone = d < 0 ? 'off' : 'good'
+    } else if (trends.goalType === 'LOSE_WEIGHT' || trends.goalType === 'RECOMP') {
+      tone = d < 0 ? 'good' : 'off'
+    }
+    return { tone, dir, num: fmtNum(Math.abs(d)) }
+  }, [trends, metric])
+
+  const chartTarget = useMemo(() => {
+    if (!trends) return null
+    if (metric === 'weight') return trends.weight.targetKg
+    if (metric === 'calories') return trends.calories.targetKcal
+    return null
+  }, [trends, metric])
+
+  const formatDate = useMemo(() => {
+    if (trends?.bucket === 'month') return monthFaDate
+    return shortFaDate
+  }, [trends])
+
+  const microStats = useMemo<{ label: string; value: string }[]>(() => {
+    if (!trends) return []
+    if (metric === 'calories') {
+      return [
+        { label: 'میانگین', value: trends.calories.avgKcal != null ? fmtInt(trends.calories.avgKcal) : '—' },
+        { label: 'هدف', value: trends.calories.targetKcal != null ? fmtInt(trends.calories.targetKcal) : '—' },
+        { label: 'روز ثبت‌شده', value: enDigits(trends.calories.loggedDays) },
+      ]
+    }
+    const pts = metric === 'weight' ? trends.weight.points : trends.bodyFat.points
+    if (pts.length === 0) return []
+    const vals = pts.map((p) => p.value)
+    const avg = vals.reduce((s, v) => s + v, 0) / vals.length
+    return [
+      { label: 'کمترین', value: fmtNum(Math.min(...vals)) },
+      { label: 'بیشترین', value: fmtNum(Math.max(...vals)) },
+      { label: 'میانگین', value: fmtNum(avg) },
+    ]
+  }, [trends, metric])
+
+  const chartEmpty = useMemo(() => {
+    if (metric === 'calories') return metricPoints.length === 0
+    return metricPoints.length < 2
+  }, [metric, metricPoints])
 
   async function loadBoard(period: 'weekly' | 'monthly') {
     setBoardPeriod(period)
@@ -169,7 +267,7 @@ export function ProgressTab() {
       toast.success('وزن امروز ثبت شد')
       setSheetOpen(false)
       setWeightInput('')
-      await load()
+      await Promise.all([load(), loadTrends(range)])
     } catch {
       toast.error('ثبت وزن انجام نشد.')
     } finally {
@@ -185,8 +283,8 @@ export function ProgressTab() {
   if (loading) {
     return (
       <div className="space-y-8 pt-2">
-        <div className="h-40 w-full animate-pulse rounded-2xl bg-muted" />
-        <div className="h-20 w-full animate-pulse rounded-2xl bg-muted/70" />
+        <div className="h-32 w-full animate-pulse rounded-2xl bg-muted" />
+        <div className="h-72 w-full animate-pulse rounded-2xl bg-muted/70" />
         <div className="h-32 w-full animate-pulse rounded-2xl bg-muted/50" />
       </div>
     )
@@ -200,7 +298,7 @@ export function ProgressTab() {
 
   return (
     <div className="space-y-8">
-      {/* ── Weight journey — hero ── */}
+      {/* ── Weight — compact hero ── */}
       <section aria-label="وزن" className="pt-1">
         <div className="flex items-center justify-between px-0.5">
           <h1 className="eyebrow">پیشرفت من</h1>
@@ -221,10 +319,12 @@ export function ProgressTab() {
               <span className="ms-1.5 text-sm font-normal text-white/60">کیلوگرم</span>
             </p>
             {weight?.changeKg != null && weight.changeKg !== 0 && (
-              <span className="tnum flex items-center gap-1 pb-1 text-xs font-bold text-energy">
+              <span className="flex items-center gap-1 pb-1 text-xs font-bold text-energy">
                 {losing ? <TrendingDown className="size-3.5" aria-hidden /> : <TrendingUp className="size-3.5" aria-hidden />}
-                {losing ? '' : '+'}
-                {fmtNum(weight.changeKg)}
+                <span dir="ltr" className="tnum">
+                  {losing ? '−' : '+'}
+                  {fmtNum(Math.abs(weight.changeKg))}
+                </span>
               </span>
             )}
           </div>
@@ -237,10 +337,163 @@ export function ProgressTab() {
               )}
             </p>
           )}
+        </div>
+      </section>
 
-          <div className="mt-4">
-            <WeightChart records={weight?.records ?? []} targetKg={weight?.targetKg ?? null} className="text-white" />
+      {/* ── روندها — وزن / چربی بدن / کالری ── */}
+      <section aria-label="روندها" className="space-y-3">
+        <div className="flex items-center justify-between px-0.5">
+          <h2 className="eyebrow">روندها</h2>
+          {trendsError && (
+            <button
+              type="button"
+              onClick={() => void loadTrends(range)}
+              className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              تلاش دوباره
+            </button>
+          )}
+        </div>
+
+        <div className="rounded-3xl bg-card p-5 shadow-[0_1px_3px_oklch(0.175_0_0/0.05)]">
+          {/* metric switcher */}
+          <div className="flex rounded-full bg-muted p-1" role="tablist" aria-label="سنجه نمودار">
+            {METRICS.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                role="tab"
+                aria-selected={metric === m.key}
+                onClick={() => setMetric(m.key)}
+                className={cn(
+                  'relative flex-1 cursor-pointer rounded-full py-1.5 text-[13px] font-bold transition-colors',
+                  metric === m.key ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {metric === m.key && (
+                  <motion.span
+                    layoutId="metric-pill"
+                    className="absolute inset-0 rounded-full bg-primary"
+                    transition={{ type: 'spring', stiffness: 500, damping: 42 }}
+                  />
+                )}
+                <span className="relative">{m.label}</span>
+              </button>
+            ))}
           </div>
+
+          {/* current value + delta */}
+          <div className="mt-4 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="tnum text-[32px] font-bold leading-none tracking-tight">
+                {bigValue ?? '—'}
+                <span className="ms-1.5 text-xs font-normal text-muted-foreground">{metricInfo.unit}</span>
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">{metricInfo.caption}</p>
+            </div>
+            {delta && (
+              <span
+                className={cn(
+                  'flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold',
+                  CHIP_TONE[delta.tone],
+                )}
+              >
+                {delta.dir === 'down' ? (
+                  <TrendingDown className="size-3" aria-hidden />
+                ) : delta.dir === 'up' ? (
+                  <TrendingUp className="size-3" aria-hidden />
+                ) : (
+                  <Minus className="size-3" aria-hidden />
+                )}
+                <span dir="ltr" className="tnum">{delta.num}</span>
+                {delta.suffix && <span>{delta.suffix}</span>}
+              </span>
+            )}
+          </div>
+
+          {/* range selector */}
+          <div className="mt-4 flex rounded-full bg-muted p-0.5" role="tablist" aria-label="بازه زمانی">
+            {RANGES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                role="tab"
+                aria-selected={range === r.key}
+                onClick={() => setRange(r.key)}
+                className={cn(
+                  'relative flex-1 cursor-pointer rounded-full py-1 text-[11px] font-bold transition-colors',
+                  range === r.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {range === r.key && (
+                  <motion.span
+                    layoutId="range-pill"
+                    className="absolute inset-0 rounded-full bg-background shadow-sm"
+                    transition={{ type: 'spring', stiffness: 500, damping: 42 }}
+                  />
+                )}
+                <span className="relative">{r.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* chart body */}
+          <div className="mt-3 min-h-[176px]">
+            {trendsLoading && !trends ? (
+              <div className="flex min-h-[176px] items-center">
+                <div className="h-36 w-full animate-pulse rounded-2xl bg-muted/60" />
+              </div>
+            ) : trendsError && !trends ? (
+              <div className="flex min-h-[176px] flex-col items-center justify-center gap-3 text-center">
+                <p className="text-xs text-muted-foreground">نمودارها بارگذاری نشد.</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-full px-4 text-xs"
+                  onClick={() => void loadTrends(range)}
+                >
+                  تلاش دوباره
+                </Button>
+              </div>
+            ) : trends && chartEmpty ? (
+              (() => {
+                const hint = EMPTY_HINTS[metric]
+                return (
+                  <div className="flex min-h-[176px] flex-col items-center justify-center gap-2.5 text-center">
+                    <span className="flex size-10 items-center justify-center rounded-full bg-surface-alt text-muted-foreground">
+                      <hint.icon className="size-4.5" aria-hidden />
+                    </span>
+                    <p className="max-w-[250px] text-xs leading-5 text-muted-foreground">{hint.text}</p>
+                  </div>
+                )
+              })()
+            ) : trends && metricPoints.length >= (metric === 'calories' ? 1 : 2) ? (
+              <TrendChart
+                key={`${metric}-${range}`}
+                points={metricPoints}
+                mode={metric === 'calories' ? 'bar' : 'line'}
+                tone={metricInfo.tone}
+                target={chartTarget}
+                targetLabel="هدف"
+                unit={metricInfo.unit}
+                formatValue={metric === 'calories' ? fmtInt : fmtNum}
+                formatDate={formatDate}
+                ariaLabel={`نمودار ${metricInfo.label} در ${RANGES.find((r) => r.key === range)?.label ?? ''} اخیر`}
+              />
+            ) : null}
+          </div>
+
+          {/* period micro-stats */}
+          {microStats.length > 0 && !chartEmpty && (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {microStats.map((s) => (
+                <div key={s.label} className="rounded-2xl bg-surface-alt px-1 py-2.5 text-center">
+                  <p className="tnum truncate text-sm font-bold">{s.value}</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

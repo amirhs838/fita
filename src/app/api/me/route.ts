@@ -21,6 +21,12 @@ export async function GET() {
         })
       : null
 
+    // Latest tape measurements so Profile → «اطلاعات بدنی» opens pre-filled.
+    const latestMeasurement = await db.bodyMeasurement.findFirst({
+      where: { userId: user.id },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    })
+
     return ok({
       user: { id: user.id, phone: user.phone, name: user.name },
       profile: user.profile
@@ -33,6 +39,16 @@ export async function GET() {
             budgetLevel: user.profile.budgetLevel,
           }
         : null,
+      body: {
+        heightCm: user.profile?.heightCm ?? null,
+        currentWeightKg: user.profile?.currentWeightKg ?? null,
+        waistCm: latestMeasurement?.waistCm ?? null,
+        hipCm: latestMeasurement?.hipCm ?? null,
+        neckCm: latestMeasurement?.neckCm ?? null,
+        armCm: latestMeasurement?.armCm ?? null,
+        thighCm: latestMeasurement?.thighCm ?? null,
+        measuredAt: latestMeasurement?.date ?? null,
+      },
       onboarded: Boolean(user.profile?.onboardedAt),
       goal: activeGoal ? { type: activeGoal.type, targetWeightKg: activeGoal.targetWeightKg } : null,
       subscription: {
