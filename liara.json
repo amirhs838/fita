@@ -1,0 +1,22 @@
+{
+  "app": "fita",
+  "port": 3000,
+  "disks": [
+    {
+      "name": "fita-data",
+      "mountTo": "/app/data",
+      "size": 1
+    }
+  ],
+  "minReplica": 1,
+  "maxReplica": 1,
+  "env": {
+    "DATABASE_URL": "file:/app/data/custom.db",
+    "AI_PROVIDER": "openrouter"
+  },
+  "secrets": {
+    "JWT_SECRET": "generate-and-set-in-dashboard",
+    "ADMIN_PASSWORD": "generate-and-set-in-dashboard",
+    "ADMIN_SESSION_SECRET": "generate-and-set-in-dashboard"
+  }
+}
